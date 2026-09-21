@@ -1,5 +1,6 @@
 package com.ticket.system.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.ticket.system.entity.Role;
 import com.ticket.system.entity.User;
 
@@ -14,14 +15,18 @@ public class UserResponse {
     private String mobile;
     private String designation;
     private String office;
+    private ClientOrganizationResponse organization;
     private Role role;
+
+    @JsonProperty("isActive")
     private boolean isActive;
 
     public UserResponse() {
     }
 
     public UserResponse(UUID id, String email, String firstName, String lastName,
-                        String mobile, String designation, String office, Role role, boolean isActive) {
+                        String mobile, String designation, String office,
+                        ClientOrganizationResponse organization, Role role, boolean isActive) {
         this.id = id;
         this.email = email;
         this.firstName = firstName;
@@ -29,11 +34,15 @@ public class UserResponse {
         this.mobile = mobile;
         this.designation = designation;
         this.office = office;
+        this.organization = organization;
         this.role = role;
         this.isActive = isActive;
     }
 
     public static UserResponse fromEntity(User user) {
+        if (user == null) {
+            return null;
+        }
         return new UserResponse(
                 user.getId(),
                 user.getEmail(),
@@ -42,6 +51,7 @@ public class UserResponse {
                 user.getMobile(),
                 user.getDesignation(),
                 user.getOffice(),
+                ClientOrganizationResponse.fromEntity(user.getOrganization()),
                 user.getRole(),
                 user.isActive()
         );
@@ -101,6 +111,14 @@ public class UserResponse {
 
     public void setOffice(String office) {
         this.office = office;
+    }
+
+    public ClientOrganizationResponse getOrganization() {
+        return organization;
+    }
+
+    public void setOrganization(ClientOrganizationResponse organization) {
+        this.organization = organization;
     }
 
     public Role getRole() {

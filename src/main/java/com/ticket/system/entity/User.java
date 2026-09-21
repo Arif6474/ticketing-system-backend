@@ -34,6 +34,10 @@ public class User {
     @Column(length = 100)
     private String office;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "organization_id")
+    private ClientOrganization organization;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private Role role;
@@ -51,7 +55,8 @@ public class User {
     }
 
     public User(UUID id, String email, String passwordHash, String firstName, String lastName,
-                String mobile, String designation, String office, Role role, boolean isActive) {
+                String mobile, String designation, String office, ClientOrganization organization,
+                Role role, boolean isActive) {
         this.id = id;
         this.email = email;
         this.passwordHash = passwordHash;
@@ -60,6 +65,7 @@ public class User {
         this.mobile = mobile;
         this.designation = designation;
         this.office = office;
+        this.organization = organization;
         this.role = role;
         this.isActive = isActive;
     }
@@ -138,6 +144,14 @@ public class User {
 
     public void setOffice(String office) {
         this.office = office;
+    }
+
+    public ClientOrganization getOrganization() {
+        return organization;
+    }
+
+    public void setOrganization(ClientOrganization organization) {
+        this.organization = organization;
     }
 
     public Role getRole() {

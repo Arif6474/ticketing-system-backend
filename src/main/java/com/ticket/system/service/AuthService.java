@@ -5,6 +5,7 @@ import com.ticket.system.dto.response.AuthResponse;
 import com.ticket.system.dto.response.GenericResponse;
 import com.ticket.system.dto.response.UserResponse;
 import com.ticket.system.entity.PasswordResetToken;
+import com.ticket.system.entity.Role;
 import com.ticket.system.entity.User;
 import com.ticket.system.exception.AppException;
 import com.ticket.system.repository.PasswordResetTokenRepository;
@@ -46,14 +47,21 @@ public class AuthService {
         this.tokenProvider = tokenProvider;
     }
 
+    private void validateUserAndOrgActive(User user) {
+        if (!user.isActive()) {
+            throw new AppException(HttpStatus.UNAUTHORIZED, "User account is inactive");
+        }
+        if (user.getRole() != Role.APP_ADMIN && user.getOrganization() != null && !user.getOrganization().isActive()) {
+            throw new AppException(HttpStatus.UNAUTHORIZED, "User organization is inactive");
+        }
+    }
+
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
         User user = userRepository.findByEmailIgnoreCase(request.getEmail())
                 .orElseThrow(() -> new AppException(HttpStatus.UNAUTHORIZED, "Invalid email or password"));
 
-        if (!user.isActive()) {
-            throw new AppException(HttpStatus.UNAUTHORIZED, "User account is inactive");
-        }
+        validateUserAndOrgActive(user);
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new AppException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
@@ -68,9 +76,7 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(HttpStatus.UNAUTHORIZED, "User not found"));
 
-        if (!user.isActive()) {
-            throw new AppException(HttpStatus.UNAUTHORIZED, "User account is inactive");
-        }
+        validateUserAndOrgActive(user);
 
         return UserResponse.fromEntity(user);
     }
@@ -80,9 +86,7 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "User not found"));
 
-        if (!user.isActive()) {
-            throw new AppException(HttpStatus.FORBIDDEN, "User account is inactive");
-        }
+        validateUserAndOrgActive(user);
 
         user.setFirstName(request.getFirstName());
         user.setLastName(request.getLastName());

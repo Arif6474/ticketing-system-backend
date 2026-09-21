@@ -6,7 +6,7 @@ Spring Boot 3 REST API service for the Internal Ticketing System.
 
 ## 1. Backend Overview
 
-The backend service provides RESTful APIs, data persistence, and authentication logic for the Internal Ticketing System. It connects to PostgreSQL and exposes stateless JWT-secured endpoints consumed by the React single-page frontend application.
+The backend service provides RESTful APIs, data persistence, organization scoping, user management, and multi-tenant Role-Based Access Control (RBAC) for the Internal Ticketing System. It connects to PostgreSQL and exposes stateless JWT-secured endpoints consumed by the React single-page frontend application.
 
 ---
 
@@ -14,7 +14,7 @@ The backend service provides RESTful APIs, data persistence, and authentication 
 
 - **Framework**: Spring Boot 3.4.3
 - **JDK Version**: Java 17+
-- **Security**: Spring Security 6 (Stateless JWT Authentication)
+- **Security**: Spring Security 6 (Stateless JWT Authentication & Method Security)
 - **Password Hashing**: BCrypt
 - **Database**: PostgreSQL 16 (via Spring Data JPA & Hibernate)
 - **Database Migrations**: Flyway
@@ -31,18 +31,18 @@ backend/
 │   ├── main/
 │   │   ├── java/com/ticket/system/
 │   │   │   ├── config/           # SecurityConfig, WebConfig
-│   │   │   ├── controller/       # AuthController, HealthController
-│   │   │   ├── dto/              # Request & Response DTOs
-│   │   │   ├── entity/           # User, PasswordResetToken, Role
+│   │   │   ├── controller/       # AuthController, OrganizationController, UserController, HealthController
+│   │   │   ├── dto/              # Request & Response DTOs (Organization, User, Auth)
+│   │   │   ├── entity/           # User, ClientOrganization, PasswordResetToken, Role
 │   │   │   ├── exception/        # AppException, GlobalExceptionHandler
-│   │   │   ├── repository/       # UserRepository, PasswordResetTokenRepository
+│   │   │   ├── repository/       # UserRepository, ClientOrganizationRepository, UserSpecification
 │   │   │   ├── security/         # JwtTokenProvider, JwtAuthenticationFilter, UserSecurityDetails
-│   │   │   ├── service/          # AuthService, AdminSeeder
+│   │   │   ├── service/          # AuthService, UserService, OrganizationService, AdminSeeder
 │   │   │   └── TicketingSystemApplication.java
 │   │   └── resources/
-│   │       ├── db/migration/     # Flyway V1__init_authentication_schema.sql
+│   │       ├── db/migration/     # Flyway V1 & V2 migration scripts
 │   │       └── application.yml   # Environment properties
-│   └── test/                     # Integration and Unit test suite
+│   └── test/                     # Security, Auth, Org & User Management Integration Test suite
 ├── .gitignore                    # Backend-specific ignore rules
 ├── pom.xml                       # Maven POM
 └── README.md                     # Backend documentation
@@ -54,106 +54,105 @@ backend/
 
 Database schema modifications are managed exclusively via **Flyway migrations** (`src/main/resources/db/migration`). Hibernate DDL auto-generation is set to `ddl-auto: validate`.
 
-### V1 Initial Migration (`V1__init_authentication_schema.sql`)
-- `users`: Stores user identity, BCrypt `password_hash`, role enum (`APP_ADMIN`, `CLIENT_ADMIN`, `CLIENT_USER`), and active status flag.
-- `password_reset_tokens`: Stores password reset request tokens with `token_hash` (SHA-256 hashed), expiration timestamps, and used status.
+### Schema Version History
+- **V1 (`V1__init_authentication_schema.sql`)**: Initial schema for `users` and `password_reset_tokens`.
+- **V2 (`V2__init_organization_and_user_management.sql`)**: Creates `client_organizations` table and adds `organization_id` foreign key with indexes on `users(organization_id)`, `users(role)`, `users(is_active)`, and `client_organizations(code)`.
 
 ---
 
-## 5. Environment Variables
+## 5. Organization Model & Organization-Scoped Users
 
-| Variable | Description | Default / Example Value |
-| :--- | :--- | :--- |
-| `POSTGRES_HOST` | PostgreSQL hostname | `localhost` |
-| `POSTGRES_PORT` | PostgreSQL port | `5432` |
-| `POSTGRES_DB` | Database name | `ticketing_db` |
-| `POSTGRES_USER` | Database username | `postgres` |
-| `POSTGRES_PASSWORD` | Database password | `postgres` |
-| `SERVER_PORT` | Embedded Tomcat HTTP port | `8080` |
-| `FRONTEND_URL` | Allowed CORS origin | `http://localhost:5173` |
-| `JWT_SECRET` | Secret key for signing JWTs | `v9y$B&E)H@MbQeThWmZq4t7w!z%C*F-JaNdRfUjXn2r5u8x/A?D(G+KbPeShVkYp` |
-| `JWT_EXPIRATION_MS` | JWT validity in milliseconds | `86400000` (24 Hours) |
-| `SEED_ADMIN_EMAIL` | Development admin seed email | `admin@example.com` |
-| `SEED_ADMIN_PASSWORD` | Development admin seed password | `Admin@12345` |
+### Client Organization Entity
+`ClientOrganization` contains:
+- `id` (UUID PRIMARY KEY)
+- `name` (String, required)
+- `code` (String, required, unique, normalized to uppercase)
+- `description` (Text, optional)
+- `isActive` (Boolean, default `true`)
 
----
+### Role & Organization Relationship Rules
+- **`APP_ADMIN`**: Application-level super administrator. `organization` MUST be `null`. Operates across all client organizations.
+- **`CLIENT_ADMIN`**: Administrator for a single client tenant. MUST belong to exactly one active `ClientOrganization`.
+- **`CLIENT_USER`**: Standard end-user. MUST belong to exactly one active `ClientOrganization`.
 
-## 6. Authentication & API Endpoints
-
-### Public Endpoints (No Auth Required)
-- `GET /api/health` - Basic health check.
-- `POST /api/auth/login` - Authenticates user credentials and returns JWT `accessToken` & user profile.
-- `POST /api/auth/forgot-password` - Generates password reset token and logs development email stub. Always returns a generic non-leaking message.
-- `POST /api/auth/reset-password` - Validates token and resets user password.
-
-### Protected Endpoints (Requires `Authorization: Bearer <token>`)
-- `GET /api/auth/me` - Retrieves current authenticated user's profile.
-- `PUT /api/auth/me` - Updates allowed profile fields (`firstName`, `lastName`, `mobile`, `designation`, `office`).
-- `POST /api/auth/change-password` - Validates current password and sets new BCrypt password.
+### Organization Deactivation Policy
+When an organization is deactivated (`isActive = false`):
+- All belonging client users (`CLIENT_ADMIN` and `CLIENT_USER`) are immediately blocked from authenticating or executing protected API requests.
+- No user records are deleted, maintaining full database referential integrity.
 
 ---
 
-## 7. Local Testing Examples (cURL)
+## 6. Server-Side Role-Based Access Control (RBAC) Matrix
 
-### 1. Login (Development Seed Admin)
-```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@example.com", "password": "Admin@12345"}'
-```
-
-### 2. Get Current Profile
-```bash
-curl -X GET http://localhost:8080/api/auth/me \
-  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>"
-```
-
-### 3. Change Password
-```bash
-curl -X POST http://localhost:8080/api/auth/change-password \
-  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"currentPassword": "Admin@12345", "newPassword": "NewAdminPass@123"}'
-```
-
-### 4. Forgot Password
-```bash
-curl -X POST http://localhost:8080/api/auth/forgot-password \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@example.com"}'
-```
-*Check backend server console output for the development email stub containing the raw token:*
-```text
-========== DEVELOPMENT EMAIL STUB ==========
-Password reset requested for email: admin@example.com
-Raw Reset Token (Dev Only): 3128e2f0-b342-4c26-833c-37112b680034-...
-=============================================
-```
-
-### 5. Reset Password
-```bash
-curl -X POST http://localhost:8080/api/auth/reset-password \
-  -H "Content-Type: application/json" \
-  -d '{"token": "<RAW_RESET_TOKEN_FROM_LOGS>", "newPassword": "ResetAdminPass@123"}'
-```
+| Action | APP_ADMIN | CLIENT_ADMIN | CLIENT_USER |
+|---|---|---|---|
+| **List / Search Users** | All Organizations | Own Organization Only | Forbidden (403) |
+| **View User Details** | Any User | Own Organization Only | Forbidden (403) |
+| **Create APP_ADMIN** | Yes (Org must be null) | Forbidden (403) | Forbidden (403) |
+| **Create CLIENT_ADMIN / USER** | Yes (Must select Org) | Yes (Forced to own Org) | Forbidden (403) |
+| **Edit APP_ADMIN** | Yes | Forbidden (403) | Forbidden (403) |
+| **Edit CLIENT_ADMIN / USER** | Yes | Yes (Own Org only) | Forbidden (403) |
+| **Deactivate User** | Yes | Yes (Own Org only, not APP_ADMIN) | Forbidden (403) |
+| **Hard Delete User** | Yes | Forbidden (403) | Forbidden (403) |
+| **Force Password Reset** | Yes (Any User) | Yes (Own Org, not APP_ADMIN) | Forbidden (403) |
+| **Manage Organizations** | Full CRUD | View Own Org Only | Forbidden (403) |
 
 ---
 
-## 8. Security Rationale & Architectural Decisions
+## 7. API Endpoint Summary
 
-1. **BCrypt Hashing**: Passwords are never stored or logged in plaintext. Spring Security's `BCryptPasswordEncoder` is used for salted password hashing.
-2. **Hashed Reset Tokens**: Raw password reset tokens are generated using cryptographically secure random UUIDs. Only SHA-256 hashes of reset tokens are stored in PostgreSQL. Raw tokens are logged ONLY in the development email stub.
-3. **No Account Enumeration**: The `/forgot-password` endpoint returns the exact same generic message regardless of whether the email exists, preventing user account discovery attacks.
-4. **Stateless JWT**: Sessions are stateless (`SessionCreationPolicy.STATELESS`). Identity and roles are extracted directly from verified server-side JWT signatures and user validation.
-5. **Backend Authorization Ownership**: Backend enforces authorization on all non-public routes; client-side guards are strictly UI conveniences.
+### Public Endpoints
+- `GET /api/health` - Basic health check status.
+- `POST /api/auth/login` - Authenticates credentials, returns JWT & user profile.
+- `POST /api/auth/forgot-password` - Requests password recovery email token.
+- `POST /api/auth/reset-password` - Resets password using raw reset token.
+
+### Authentication Profile Endpoints (`Authorization: Bearer <token>`)
+- `GET /api/auth/me` - Retrieves authenticated user profile.
+- `PUT /api/auth/me` - Updates profile details (`firstName`, `lastName`, `mobile`, `designation`, `office`).
+- `POST /api/auth/change-password` - Changes password after validating current password.
+
+### Organization Management Endpoints (`/api/organizations`)
+- `POST /api/organizations` - (`APP_ADMIN`) Creates new client organization.
+- `GET /api/organizations` - (`APP_ADMIN`) Returns paginated list of organizations.
+- `GET /api/organizations/{id}` - Returns organization details (Scoped for `CLIENT_ADMIN` / `CLIENT_USER`).
+- `PUT /api/organizations/{id}` - (`APP_ADMIN`) Updates organization metadata and `isActive` status.
+
+### User Management Endpoints (`/api/users`)
+- `GET /api/users` - Paginated user search (`page`, `size`, `search`, `role`, `active`, `organizationId`). Database-level query filtering & pagination.
+- `GET /api/users/{id}` - Returns user details by ID.
+- `POST /api/users` - Creates new user adhering to RBAC matrix.
+- `PUT /api/users/{id}` - Updates user profile, role, active status, or organization assignment.
+- `PATCH /api/users/{id}/deactivate` - Deactivates user account (`isActive = false`).
+- `DELETE /api/users/{id}` - (`APP_ADMIN` only) Hard-deletes user account.
+- `POST /api/users/{id}/force-password-reset` - Administrative force password reset with BCrypt hashing.
 
 ---
 
-## 9. Running Tests
+## 8. Hard-Delete Protection & Future Issue Dependency
 
-Run full test suite (unit and security integration tests):
+> [!IMPORTANT]
+> **Hard Delete Safeguard**: Only `APP_ADMIN` can execute `DELETE /api/users/{id}`.
+> Users referenced by system entities cannot be hard deleted. Database referential integrity (`ON DELETE RESTRICT`) and service guards are structured to prevent hard deletion of users who own or are assigned to tickets once the `Issue` entity is added in upcoming steps.
+
+---
+
+## 9. Seed & Demo Accounts (Development Profile)
+
+On application startup, `AdminSeeder` automatically initializes standard demo entities if missing:
+
+| Email | Password | Role | Organization |
+| :--- | :--- | :--- | :--- |
+| `admin@example.com` | `Admin@12345` | `APP_ADMIN` | *None* (`null`) |
+| `clientadmin@acme.com` | `ClientAdmin@12345` | `CLIENT_ADMIN` | `Acme Corporation` (`ACME`) |
+| `clientuser@acme.com` | `ClientUser@12345` | `CLIENT_USER` | `Acme Corporation` (`ACME`) |
+
+---
+
+## 10. Running Tests
+
+Run full unit and security integration test suite:
 
 ```bash
-export JAVA_HOME="/opt/homebrew/Cellar/openjdk@17/17.0.20.1/libexec/openjdk.jdk/Contents/Home"
-mvn clean test
+mvn clean test -Dnet.bytebuddy.experimental=true
 ```

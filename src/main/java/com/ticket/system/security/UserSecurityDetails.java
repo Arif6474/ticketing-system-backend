@@ -1,5 +1,6 @@
 package com.ticket.system.security;
 
+import com.ticket.system.entity.Role;
 import com.ticket.system.entity.User;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -21,7 +22,8 @@ public class UserSecurityDetails implements UserDetails {
         this.id = user.getId();
         this.email = user.getEmail();
         this.passwordHash = user.getPasswordHash();
-        this.isActive = user.isActive();
+        boolean isOrgActive = user.getRole() == Role.APP_ADMIN || user.getOrganization() == null || user.getOrganization().isActive();
+        this.isActive = user.isActive() && isOrgActive;
         this.authorities = Collections.singletonList(
                 new SimpleGrantedAuthority("ROLE_" + user.getRole().name())
         );
