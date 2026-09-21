@@ -443,6 +443,59 @@ public class IssueIntegrationTest {
     }
 
     @Test
+    @DisplayName("CLIENT_ADMIN receives 403 when attempting to edit another organization's issue")
+    void testClientAdminUpdateOtherOrgIssueForbidden() throws Exception {
+        String token = jwtTokenProvider.generateToken(clientAdminAcme);
+        UpdateIssueRequest request = new UpdateIssueRequest(
+                "Unauthorized Org Edit", "Hack",
+                IssueType.BUG, IssuePriority.LOW, null
+        );
+
+        mockMvc.perform(put("/api/issues/" + issueBetaFeature.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Updating issue with module from a different project fails")
+    void testUpdateIssueModuleFromDifferentProjectFails() throws Exception {
+        String token = jwtTokenProvider.generateToken(appAdmin);
+        UpdateIssueRequest request = new UpdateIssueRequest(
+                "Updated Bug", "Desc",
+                IssueType.BUG, IssuePriority.HIGH, moduleBetaMobile.getId()
+        );
+
+        mockMvc.perform(put("/api/issues/" + issueAcmeBug.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("does not belong to the selected project")));
+    }
+
+    @Test
+    @DisplayName("Updating issue with an inactive module fails")
+    void testUpdateIssueInactiveModuleFails() throws Exception {
+        moduleAcmePay.setActive(false);
+        moduleRepository.saveAndFlush(moduleAcmePay);
+
+        String token = jwtTokenProvider.generateToken(appAdmin);
+        UpdateIssueRequest request = new UpdateIssueRequest(
+                "Updated Bug", "Desc",
+                IssueType.BUG, IssuePriority.HIGH, moduleAcmePay.getId()
+        );
+
+        mockMvc.perform(put("/api/issues/" + issueAcmeBug.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("inactive module")));
+    }
+
+    @Test
     @DisplayName("CLIENT_USER receives 403 when attempting to edit another user's issue")
     void testClientUserUpdateOtherUserIssueForbidden() throws Exception {
         String token = jwtTokenProvider.generateToken(clientUserAcme2);
