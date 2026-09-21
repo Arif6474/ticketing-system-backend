@@ -6,7 +6,7 @@ Spring Boot 3 REST API service for the Internal Ticketing System.
 
 ## 1. Backend Overview
 
-The backend service provides RESTful APIs, data persistence, organization scoping, user management, project management, project memberships, and multi-tenant Role-Based Access Control (RBAC) for the Internal Ticketing System. It connects to PostgreSQL and exposes stateless JWT-secured endpoints consumed by the React single-page frontend application.
+The backend service provides RESTful APIs, data persistence, organization scoping, user management, project management, project memberships, module management, and multi-tenant Role-Based Access Control (RBAC) for the Internal Ticketing System. It connects to PostgreSQL and exposes stateless JWT-secured endpoints consumed by the React single-page frontend application.
 
 ---
 
@@ -31,18 +31,18 @@ backend/
 │   ├── main/
 │   │   ├── java/com/ticket/system/
 │   │   │   ├── config/           # SecurityConfig, WebConfig
-│   │   │   ├── controller/       # AuthController, OrganizationController, UserController, ProjectController, ProjectMembershipController, HealthController
-│   │   │   ├── dto/              # Request & Response DTOs (Project, Membership, Organization, User, Auth)
-│   │   │   ├── entity/           # Project, ProjectMembership, User, ClientOrganization, PasswordResetToken, Role
+│   │   │   ├── controller/       # AuthController, OrganizationController, UserController, ProjectController, ProjectMembershipController, ModuleController, HealthController
+│   │   │   ├── dto/              # Request & Response DTOs (Module, Project, Membership, Organization, User, Auth)
+│   │   │   ├── entity/           # Module, Project, ProjectMembership, User, ClientOrganization, PasswordResetToken, Role
 │   │   │   ├── exception/        # AppException, GlobalExceptionHandler
-│   │   │   ├── repository/       # ProjectRepository, ProjectMembershipRepository, ProjectSpecification, UserRepository, ClientOrganizationRepository
+│   │   │   ├── repository/       # ModuleRepository, ModuleSpecification, ProjectRepository, ProjectMembershipRepository, ProjectSpecification, UserRepository, ClientOrganizationRepository
 │   │   │   ├── security/         # JwtTokenProvider, JwtAuthenticationFilter, UserSecurityDetails
-│   │   │   ├── service/          # ProjectService, ProjectMembershipService, AuthService, UserService, OrganizationService, AdminSeeder
+│   │   │   ├── service/          # ModuleService, ProjectService, ProjectMembershipService, AuthService, UserService, OrganizationService, AdminSeeder
 │   │   │   └── TicketingSystemApplication.java
 │   │   └── resources/
-│   │       ├── db/migration/     # Flyway V1, V2 & V3 migration scripts
+│   │       ├── db/migration/     # Flyway V1, V2, V3 & V4 migration scripts
 │   │       └── application.yml   # Environment properties
-│   └── test/                     # Security, Auth, Org, User & Project Integration Test suite
+│   └── test/                     # Security, Auth, Org, User, Project & Module Integration Test suite
 ├── .gitignore                    # Backend-specific ignore rules
 ├── pom.xml                       # Maven POM
 └── README.md                     # Backend documentation
@@ -58,10 +58,11 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - **V1 (`V1__init_authentication_schema.sql`)**: Initial schema for `users` and `password_reset_tokens`.
 - **V2 (`V2__init_organization_and_user_management.sql`)**: Creates `client_organizations` table and adds `organization_id` foreign key to `users`.
 - **V3 (`V3__init_projects_and_memberships.sql`)**: Creates `projects` and `project_memberships` tables with foreign keys, unique constraint `(project_id, user_id)`, and performance indexes.
+- **V4 (`V4__init_modules.sql`)**: Creates `modules` table with `project_id` foreign key (`ON DELETE RESTRICT`), unique constraint `uk_modules_project_name` (`(project_id, name)`), and performance indexes.
 
 ---
 
-## 5. Projects & Project Memberships Architecture
+## 5. Domain Models Architecture
 
 ### Project Model
 - `id` (UUID PRIMARY KEY)
@@ -77,6 +78,13 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `user_id` (UUID NOT NULL REFERENCES `users(id)` ON DELETE CASCADE)
 - Unique constraint on `(project_id, user_id)` prevents duplicate member assignments.
 
+### Module Model
+- `id` (UUID PRIMARY KEY)
+- `project_id` (UUID NOT NULL REFERENCES `projects(id)` ON DELETE RESTRICT) - Immutable after creation.
+- `name` (String, required) - Unique per project (case-insensitive).
+- `description` (Text, optional)
+- `isActive` (Boolean, default `true`)
+
 ### Cross-Tenant Membership Isolation Guard
 A user can ONLY be added as a member of a project if `user.organization.id` matches `project.organization.id`. Cross-tenant membership assignments are strictly rejected by backend service validation.
 
@@ -91,10 +99,15 @@ A user can ONLY be added as a member of a project if `user.organization.id` matc
 | **Create Project** | Yes | Forbidden (403) | Forbidden (403) |
 | **Edit Project** | Yes | Forbidden (403) | Forbidden (403) |
 | **Activate/Deactivate Project** | Yes | Forbidden (403) | Forbidden (403) |
-| **Delete Project** | Yes (Restricted by future FKs) | Forbidden (403) | Forbidden (403) |
+| **Delete Project** | Yes (Restricted by Modules FK) | Forbidden (403) | Forbidden (403) |
 | **Add Project Member** | Yes (Same Org User) | Yes (Own Org Project & User) | Forbidden (403) |
 | **Remove Project Member** | Yes | Yes (Own Org Project) | Forbidden (403) |
 | **List Project Members** | Any Project | Own Org Projects Only | Member Projects Only |
+| **Create Module** | Yes | Yes (Own Org Project) | Forbidden (403) |
+| **Edit Module** | Yes | Yes (Own Org Project) | Forbidden (403) |
+| **Deactivate Module** | Yes | Yes (Own Org Project) | Forbidden (403) |
+| **Delete Module** | Yes | Yes (Own Org Project) | Forbidden (403) |
+| **List/View Modules** | Any Project | Own Org Projects Only | Active Member Projects Only |
 | **User & Org Management** | Full | Own Organization | Forbidden (403) |
 
 ---
@@ -132,20 +145,29 @@ A user can ONLY be added as a member of a project if `user.organization.id` matc
 - `GET /api/projects` - Paginated search (`page`, `size`, `search`, `active`, `organizationId`). Scoped automatically for `CLIENT_ADMIN` (own org) and `CLIENT_USER` (member projects only).
 - `GET /api/projects/{id}` - Returns project details adhering to access matrix.
 - `PUT /api/projects/{id}` - (`APP_ADMIN`) Updates project name, short code, description, and `isActive` status. (`organizationId` is immutable).
-- `DELETE /api/projects/{id}` - (`APP_ADMIN` only) Hard-deletes project.
+- `DELETE /api/projects/{id}` - (`APP_ADMIN` only) Hard-deletes project (blocked if modules exist).
 
 ### Project Membership Endpoints (`/api/projects/{projectId}/members`)
 - `POST /api/projects/{projectId}/members` - Adds user to project. Validates user active, project active, organization match, and uniqueness.
 - `DELETE /api/projects/{projectId}/members/{userId}` - Removes user membership from project.
 - `GET /api/projects/{projectId}/members` - Returns paginated list of project members.
 
+### Module Management Endpoints (`/api/modules`)
+- `POST /api/modules` - Creates a new module within a project (`APP_ADMIN` or `CLIENT_ADMIN` of the project's org).
+- `GET /api/modules` - Paginated module search (`projectId`, `search`, `active`, `page`, `size`). Scoped automatically by RBAC.
+- `GET /api/modules/{id}` - Retrieves module details by ID.
+- `PUT /api/modules/{id}` - Updates module name and description (`projectId` immutable).
+- `PATCH /api/modules/{id}/deactivate` - Deactivates module (`isActive = false`).
+- `DELETE /api/modules/{id}` - Deletes module (`APP_ADMIN` or `CLIENT_ADMIN` of the project's org).
+
 ---
 
-## 8. Delete Behavior & Future Module/Issue Dependency
+## 8. Delete Behavior & Dependencies
 
 > [!IMPORTANT]
 > **Project Deletion Safeguard**: Only `APP_ADMIN` can execute `DELETE /api/projects/{id}`.
-> Projects referenced by future system entities (such as Modules or Issues) cannot be deleted once those features are introduced. Database foreign keys and service constraints protect data integrity across dependent domains.
+> A project **cannot be deleted** if any modules exist for that project. Attempting to delete a project with existing modules returns a `400 Bad Request` exception (`Cannot delete project because it contains modules`).
+> Modules referenced by future entities (such as Issues) will similarly be protected by `ON DELETE RESTRICT` constraints.
 
 ---
 
@@ -168,3 +190,4 @@ Run full unit and integration test suite:
 ```bash
 mvn clean test -Dnet.bytebuddy.experimental=true
 ```
+

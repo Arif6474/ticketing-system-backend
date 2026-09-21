@@ -30,15 +30,18 @@ public class ProjectService {
     private final ClientOrganizationRepository orgRepository;
     private final UserRepository userRepository;
     private final ProjectMembershipRepository membershipRepository;
+    private final ModuleRepository moduleRepository;
 
     public ProjectService(ProjectRepository projectRepository,
                           ClientOrganizationRepository orgRepository,
                           UserRepository userRepository,
-                          ProjectMembershipRepository membershipRepository) {
+                          ProjectMembershipRepository membershipRepository,
+                          ModuleRepository moduleRepository) {
         this.projectRepository = projectRepository;
         this.orgRepository = orgRepository;
         this.userRepository = userRepository;
         this.membershipRepository = membershipRepository;
+        this.moduleRepository = moduleRepository;
     }
 
     @Transactional
@@ -145,6 +148,10 @@ public class ProjectService {
 
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Project not found"));
+
+        if (moduleRepository.existsByProjectId(projectId)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Cannot delete project because it has associated modules");
+        }
 
         projectRepository.delete(project);
         return new GenericResponse("Project deleted successfully");
