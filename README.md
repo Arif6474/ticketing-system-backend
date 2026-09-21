@@ -157,6 +157,7 @@ A user can ONLY be added as a member of a project if `user.organization.id` matc
 - `GET /api/modules` - Paginated module search (`projectId`, `search`, `active`, `page`, `size`). Scoped automatically by RBAC.
 - `GET /api/modules/{id}` - Retrieves module details by ID.
 - `PUT /api/modules/{id}` - Updates module name and description (`projectId` immutable).
+- `PATCH /api/modules/{id}/activate` - Activates module (`isActive = true`).
 - `PATCH /api/modules/{id}/deactivate` - Deactivates module (`isActive = false`).
 - `DELETE /api/modules/{id}` - Deletes module (`APP_ADMIN` or `CLIENT_ADMIN` of the project's org).
 

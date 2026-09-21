@@ -352,4 +352,75 @@ public class ModuleIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message", containsString("inactive project")));
     }
+
+    // =========================================================================
+    // 5. Activation / Deactivation Tests
+    // =========================================================================
+    @Test
+    @DisplayName("APP_ADMIN can deactivate and reactivate a module")
+    void testAppAdminDeactivateAndActivateModule() throws Exception {
+        String token = jwtTokenProvider.generateToken(appAdmin);
+
+        // Deactivate
+        mockMvc.perform(patch("/api/modules/" + moduleAuth.getId() + "/deactivate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isActive", is(false)));
+
+        assertFalse(moduleRepository.findById(moduleAuth.getId()).orElseThrow().isActive());
+
+        // Reactivate
+        mockMvc.perform(patch("/api/modules/" + moduleAuth.getId() + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isActive", is(true)));
+
+        assertTrue(moduleRepository.findById(moduleAuth.getId()).orElseThrow().isActive());
+    }
+
+    @Test
+    @DisplayName("CLIENT_ADMIN can activate/deactivate module in own organization")
+    void testClientAdminActivateDeactivateOwnOrgSuccess() throws Exception {
+        String token = jwtTokenProvider.generateToken(clientAdminAcme);
+
+        // Deactivate
+        mockMvc.perform(patch("/api/modules/" + moduleAuth.getId() + "/deactivate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isActive", is(false)));
+
+        // Activate
+        mockMvc.perform(patch("/api/modules/" + moduleAuth.getId() + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isActive", is(true)));
+    }
+
+    @Test
+    @DisplayName("CLIENT_ADMIN cannot activate/deactivate module in another organization")
+    void testClientAdminActivateDeactivateOtherOrgForbidden() throws Exception {
+        String token = jwtTokenProvider.generateToken(clientAdminAcme);
+
+        mockMvc.perform(patch("/api/modules/" + modulePayment.getId() + "/deactivate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(patch("/api/modules/" + modulePayment.getId() + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("CLIENT_USER receives 403 Forbidden for activate and deactivate endpoints")
+    void testClientUserActivateDeactivateForbidden() throws Exception {
+        String token = jwtTokenProvider.generateToken(clientUserAcme);
+
+        mockMvc.perform(patch("/api/modules/" + moduleAuth.getId() + "/deactivate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(patch("/api/modules/" + moduleAuth.getId() + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
 }

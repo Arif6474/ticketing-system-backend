@@ -73,4 +73,22 @@ public class ModuleController {
         GenericResponse response = moduleService.deleteModule(userDetails.getId(), id);
         return ResponseEntity.ok(response);
     }
+
+    @PatchMapping("/{id}/activate")
+    @PreAuthorize("hasAnyRole('APP_ADMIN', 'CLIENT_ADMIN')")
+    public ResponseEntity<ModuleResponse> activateModule(
+            @AuthenticationPrincipal UserSecurityDetails userDetails,
+            @PathVariable UUID id) {
+        ModuleResponse response = moduleService.activateModule(userDetails.getId(), id);
+        return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/{id}/deactivate")
+    @PreAuthorize("hasAnyRole('APP_ADMIN', 'CLIENT_ADMIN')")
+    public ResponseEntity<ModuleResponse> deactivateModule(
+            @AuthenticationPrincipal UserSecurityDetails userDetails,
+            @PathVariable UUID id) {
+        ModuleResponse response = moduleService.deactivateModule(userDetails.getId(), id);
+        return ResponseEntity.ok(response);
+    }
 }

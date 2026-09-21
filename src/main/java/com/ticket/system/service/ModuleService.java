@@ -185,6 +185,36 @@ public class ModuleService {
         return new GenericResponse("Module deleted successfully");
     }
 
+    @Transactional
+    public ModuleResponse activateModule(UUID currentUserId, UUID moduleId) {
+        return setModuleActiveStatus(currentUserId, moduleId, true);
+    }
+
+    @Transactional
+    public ModuleResponse deactivateModule(UUID currentUserId, UUID moduleId) {
+        return setModuleActiveStatus(currentUserId, moduleId, false);
+    }
+
+    private ModuleResponse setModuleActiveStatus(UUID currentUserId, UUID moduleId, boolean active) {
+        User currentUser = getCurrentUser(currentUserId);
+        if (currentUser.getRole() == Role.CLIENT_USER) {
+            throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_USER is not authorized to modify module active status");
+        }
+
+        Module module = moduleRepository.findById(moduleId)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Module not found"));
+
+        if (currentUser.getRole() == Role.CLIENT_ADMIN) {
+            if (!Objects.equals(module.getProject().getOrganization().getId(), currentUser.getOrganization().getId())) {
+                throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_ADMIN can only modify modules in their own organization");
+            }
+        }
+
+        module.setActive(active);
+        Module saved = moduleRepository.save(module);
+        return ModuleResponse.fromEntity(saved);
+    }
+
     private User getCurrentUser(UUID userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(HttpStatus.UNAUTHORIZED, "Authenticated user not found"));
