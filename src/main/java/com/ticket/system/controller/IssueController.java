@@ -2,6 +2,7 @@ package com.ticket.system.controller;
 
 import com.ticket.system.dto.request.CreateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueRequest;
+import com.ticket.system.dto.request.UpdateIssueStageRequest;
 import com.ticket.system.dto.response.GenericResponse;
 import com.ticket.system.dto.response.IssueResponse;
 import com.ticket.system.dto.response.PageResponse;
@@ -71,6 +72,15 @@ public class IssueController {
             @PathVariable UUID id,
             @Valid @RequestBody UpdateIssueRequest request) {
         IssueResponse response = issueService.updateIssue(userDetails.getId(), id, request);
+        return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/{id}/stage")
+    public ResponseEntity<IssueResponse> updateIssueStage(
+            @AuthenticationPrincipal UserSecurityDetails userDetails,
+            @PathVariable UUID id,
+            @Valid @RequestBody UpdateIssueStageRequest request) {
+        IssueResponse response = issueService.updateIssueStage(userDetails.getId(), id, request);
         return ResponseEntity.ok(response);
     }
 

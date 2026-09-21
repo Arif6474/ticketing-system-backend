@@ -183,16 +183,33 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `GET /api/issues` - Paginated issue search (`search`, `projectId`, `moduleId`, `type`, `priority`, `stage`, `verificationStatus`, `reporterId`, `page`, `size`). Scoped by RBAC.
 - `GET /api/issues/{id}` - Retrieves issue details by ID (Scoped by RBAC).
 - `PUT /api/issues/{id}` - Updates title, description, type, priority, and module (`projectId`, `reporter`, `stage`, `verificationStatus` immutable).
+- `PATCH /api/issues/{id}/stage` - Transitions issue stage (`SUBMITTED` → `RECEIVED` → `UNDER_DEVELOPMENT` → `TESTING` → `DEPLOYED`, `SUBMITTED` → `DECLINED`, `TESTING` → `RESOLVED`) adhering to centralized state machine and role permissions.
 - `DELETE /api/issues/{id}` - Deletes issue (`APP_ADMIN` or `CLIENT_ADMIN` of project's org; `CLIENT_USER` receives `403`).
 
 ---
 
-## 8. Delete Behavior & Dependencies
+## 8. Issue Stage State Machine Architecture
+
+### Allowed Stage Transition Flow
+- **Primary Linear Flow**: `SUBMITTED` → `RECEIVED` → `UNDER_DEVELOPMENT` → `TESTING` → `DEPLOYED`
+- **Terminal Transitions**: `SUBMITTED` → `DECLINED` and `TESTING` → `RESOLVED`
+- **Terminal States**: `DEPLOYED`, `DECLINED`, `RESOLVED` have no outgoing transitions.
+
+### Role Permission Matrix for Stage Transitions
+- **`APP_ADMIN` & `CLIENT_ADMIN`**: Can perform any valid state machine transition (scoped to own org for `CLIENT_ADMIN`).
+- **`CLIENT_USER`**: Restricted strictly to transitioning their own reported issues for:
+  - `SUBMITTED` → `DECLINED`
+  - `TESTING` → `RESOLVED`
+  - *Forbidden from developer workflow transitions (`SUBMITTED → RECEIVED`, `RECEIVED → UNDER_DEVELOPMENT`, `UNDER_DEVELOPMENT → TESTING`, `TESTING → DEPLOYED`).*
+
+---
+
+## 9. Delete Behavior & Dependencies
 
 > [!IMPORTANT]
 > **Data Integrity Safeguards**:
 > - Foreign keys from `issues` to `projects`, `modules`, and `users` use `ON DELETE RESTRICT`. A project, module, or user cannot be deleted if referenced by existing issue records.
-> - **Stage Transition & Verification Workflows**: Stage transitions, lifecycle state machine enforcement, verification approval/rejection workflows, comments, attachments, and audit logs are implemented in subsequent feature branches.
+> - **Verification Workflows, Comments & Attachments**: Verification approval/rejection workflows, issue comments, file attachments, and audit logs are implemented in subsequent feature branches.
 
 ---
 

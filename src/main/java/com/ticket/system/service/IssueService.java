@@ -2,6 +2,7 @@ package com.ticket.system.service;
 
 import com.ticket.system.dto.request.CreateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueRequest;
+import com.ticket.system.dto.request.UpdateIssueStageRequest;
 import com.ticket.system.dto.response.GenericResponse;
 import com.ticket.system.dto.response.IssueResponse;
 import com.ticket.system.dto.response.PageResponse;
@@ -29,17 +30,20 @@ public class IssueService {
     private final ModuleRepository moduleRepository;
     private final UserRepository userRepository;
     private final ProjectMembershipRepository membershipRepository;
+    private final IssueStageTransitionService stageTransitionService;
 
     public IssueService(IssueRepository issueRepository,
                         ProjectRepository projectRepository,
                         ModuleRepository moduleRepository,
                         UserRepository userRepository,
-                        ProjectMembershipRepository membershipRepository) {
+                        ProjectMembershipRepository membershipRepository,
+                        IssueStageTransitionService stageTransitionService) {
         this.issueRepository = issueRepository;
         this.projectRepository = projectRepository;
         this.moduleRepository = moduleRepository;
         this.userRepository = userRepository;
         this.membershipRepository = membershipRepository;
+        this.stageTransitionService = stageTransitionService;
     }
 
     @Transactional
@@ -224,6 +228,33 @@ public class IssueService {
 
         issueRepository.delete(issue);
         return new GenericResponse("Issue deleted successfully");
+    }
+
+    @Transactional
+    public IssueResponse updateIssueStage(UUID currentUserId, UUID issueId, UpdateIssueStageRequest request) {
+        User currentUser = getCurrentUser(currentUserId);
+        Issue issue = issueRepository.findById(issueId)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Issue not found"));
+
+        if (currentUser.getRole() == Role.CLIENT_ADMIN) {
+            if (!Objects.equals(issue.getProject().getOrganization().getId(), currentUser.getOrganization().getId())) {
+                throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_ADMIN cannot modify stage of issue in another organization");
+            }
+        } else if (currentUser.getRole() == Role.CLIENT_USER) {
+            if (!Objects.equals(issue.getReporter().getId(), currentUser.getId())) {
+                throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_USER can only modify stage of issues that they reported");
+            }
+            if (!Objects.equals(issue.getProject().getOrganization().getId(), currentUser.getOrganization().getId()) ||
+                !membershipRepository.existsByProjectIdAndUserId(issue.getProject().getId(), currentUser.getId())) {
+                throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_USER can only modify stage of issues in member projects");
+            }
+        }
+
+        stageTransitionService.validateTransition(issue.getStage(), request.getStage(), currentUser.getRole());
+
+        issue.setStage(request.getStage());
+        Issue updated = issueRepository.save(issue);
+        return IssueResponse.fromEntity(updated);
     }
 
     private User getCurrentUser(UUID userId) {
