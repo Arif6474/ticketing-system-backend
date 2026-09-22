@@ -1,6 +1,7 @@
 package com.ticket.system;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ticket.system.dto.request.UpdateIssueRequest;
 import com.ticket.system.dto.request.UpdateVerificationStatusRequest;
 import com.ticket.system.entity.*;
 import com.ticket.system.repository.*;
@@ -358,8 +359,9 @@ public class IssueVerificationIntegrationTest {
     }
 
     @Test
-    @DisplayName("Passing PENDING_VERIFICATION in decision request returns 400 Bad Request")
-    void updateVerificationStatus_invalidStatusPending_returns400() throws Exception {
+    @DisplayName("Passing PENDING_VERIFICATION in decision request returns 400 Bad Request and creates no audit")
+    void updateVerificationStatus_invalidStatusPending_returns400AndNoAudit() throws Exception {
+        int initialAuditCount = auditRepository.findByIssueIdOrderByCreatedAtAscIdAsc(issueAcme1.getId()).size();
         UpdateVerificationStatusRequest request = new UpdateVerificationStatusRequest(VerificationStatus.PENDING_VERIFICATION);
 
         mockMvc.perform(patch("/api/issues/" + issueAcme1.getId() + "/verification")
@@ -368,6 +370,53 @@ public class IssueVerificationIntegrationTest {
                         .header("Authorization", "Bearer " + tokenAppAdmin))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message", containsString("must be VERIFIED or REJECTED")));
+
+        int finalAuditCount = auditRepository.findByIssueIdOrderByCreatedAtAscIdAsc(issueAcme1.getId()).size();
+        assertEquals(initialAuditCount, finalAuditCount, "Failed decision must create no audit log");
+    }
+
+    @Test
+    @DisplayName("Reworking a REJECTED issue via PUT /api/issues/{id} resets status to PENDING_VERIFICATION and returns to queue")
+    void reworkRejectedIssue_resetsToPendingVerificationAndAppearsInQueue() throws Exception {
+        // 1. Reject issueAcme1
+        issueAcme1.setVerificationStatus(VerificationStatus.REJECTED);
+        issueRepository.saveAndFlush(issueAcme1);
+
+        // 2. Reporter edits/reworks issue
+        UpdateIssueRequest updateRequest = new UpdateIssueRequest(
+                "Acme Issue 1 Login Bug Reworked",
+                "Updated description with more details for verification",
+                IssueType.BUG,
+                IssuePriority.HIGH,
+                null
+        );
+
+        mockMvc.perform(put("/api/issues/" + issueAcme1.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateRequest))
+                        .header("Authorization", "Bearer " + tokenClientUserAcme))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.verificationStatus", is("PENDING_VERIFICATION")));
+
+        Issue updated = issueRepository.findById(issueAcme1.getId()).orElseThrow();
+        assertEquals(VerificationStatus.PENDING_VERIFICATION, updated.getVerificationStatus());
+
+        // 3. Verify audit log REJECTED -> PENDING_VERIFICATION
+        List<IssueAudit> audits = auditRepository.findByIssueIdOrderByCreatedAtAscIdAsc(issueAcme1.getId());
+        boolean foundReworkAudit = audits.stream().anyMatch(a ->
+                a.getAction() == AuditEventType.VERIFICATION_CHANGED &&
+                "verificationStatus".equals(a.getFieldName()) &&
+                "REJECTED".equals(a.getOldValue()) &&
+                "PENDING_VERIFICATION".equals(a.getNewValue()) &&
+                a.getActor().getId().equals(clientUserAcme.getId())
+        );
+        assertTrue(foundReworkAudit, "Rework audit log REJECTED -> PENDING_VERIFICATION must exist");
+
+        // 4. Verify issue reappears in verification queue
+        mockMvc.perform(get("/api/issues/verification-queue")
+                        .header("Authorization", "Bearer " + tokenClientAdminAcme))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].id", hasItem(issueAcme1.getId().toString())));
     }
 
     @Test

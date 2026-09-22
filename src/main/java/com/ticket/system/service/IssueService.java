@@ -230,6 +230,12 @@ public class IssueService {
         issue.setPriority(newPriority);
         issue.setModule(module);
 
+        VerificationStatus oldVerifStatus = issue.getVerificationStatus();
+        boolean isResettingRejected = (oldVerifStatus == VerificationStatus.REJECTED);
+        if (isResettingRejected) {
+            issue.setVerificationStatus(VerificationStatus.PENDING_VERIFICATION);
+        }
+
         Issue updated = issueRepository.save(issue);
 
         if (!Objects.equals(oldTitle, newTitle)) {
@@ -254,6 +260,9 @@ public class IssueService {
             String oldModName = oldModule != null ? oldModule.getName() : null;
             String newModName = module != null ? module.getName() : null;
             issueAuditService.recordFieldChange(updated, currentUser, "module", oldModName, newModName);
+        }
+        if (isResettingRejected) {
+            issueAuditService.recordVerificationChange(updated, currentUser, "REJECTED", "PENDING_VERIFICATION");
         }
 
         return IssueResponse.fromEntity(updated);
