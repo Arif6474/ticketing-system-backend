@@ -62,6 +62,7 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - **V5 (`V5__init_issues.sql`)**: Creates `issues` table with foreign keys `project_id`, `module_id` (nullable), `reporter_id` (`ON DELETE RESTRICT`), enums `type`, `priority`, `stage`, `verification_status`, and performance indexes.
 - **V6 (`V6__init_issue_audits.sql`)**: Creates `issue_audits` table with foreign keys `issue_id` and `actor_id` (`ON DELETE RESTRICT`), enums `action` (`ISSUE_CREATED`, `FIELD_CHANGED`, `STAGE_CHANGED`), `field_name`, `old_value`, `new_value`, and performance indexes.
 - **V7 (`V7__init_issue_comments.sql`)**: Creates `issue_comments` table with foreign keys `issue_id` and `author_id` (`ON DELETE RESTRICT`), `content` TEXT NOT NULL, timestamps, and performance indexes.
+- **V8 (`V8__init_issue_attachments.sql`)**: Creates `issue_attachments` table with foreign keys `issue_id` and `uploaded_by` (`ON DELETE RESTRICT`), `original_filename`, `stored_filename`, `object_key` (UNIQUE), `content_type`, `file_size`, `created_at`, and performance indexes.
 
 ---
 
@@ -118,6 +119,17 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `createdAt` (Timestamp WITH TIME ZONE)
 - `updatedAt` (Timestamp WITH TIME ZONE)
 
+### Issue Attachment Model
+- `id` (UUID PRIMARY KEY)
+- `issue_id` (UUID NOT NULL REFERENCES `issues(id)` ON DELETE RESTRICT)
+- `uploaded_by` (UUID NOT NULL REFERENCES `users(id)` ON DELETE RESTRICT) - Authenticated user uploading attachment.
+- `original_filename` (String NOT NULL)
+- `stored_filename` (String NOT NULL)
+- `object_key` (String NOT NULL UNIQUE) - Unpredictable format: `issues/{issueId}/{randomUUID}.{ext}`
+- `content_type` (String NOT NULL)
+- `file_size` (Long NOT NULL) - Up to 10 MB maximum.
+- `created_at` (Timestamp WITH TIME ZONE)
+
 ### Cross-Tenant & Module Integrity Guards
 - A user can ONLY create an issue for a project in their organization (or a project where they hold an active membership for `CLIENT_USER`).
 - When `moduleId` is provided, backend validation strictly enforces that the module exists, is active, and belongs to the specified `projectId`.
@@ -148,6 +160,9 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 | **View Issue Audits** | Any Issue Audit | Own Org Issue Audits | Authorized Issue Audits (Member Projects) |
 | **Create / List Comments** | Any Accessible Issue | Own Org Issues | Authorized Member Project Issues |
 | **Edit / Delete Comment** | Any Comment | Own Comments Only | Own Comments Only |
+| **Upload / List Attachments** | Any Accessible Issue | Own Org Issues | Authorized Member Project Issues |
+| **Download Attachment** | Any Accessible Issue | Own Org Issues | Authorized Member Project Issues |
+| **Delete Attachment** | Any Attachment | Uploader Only (Own Org) | Uploader Only (Member Projects) |
 | **User & Org Management** | Full | Own Organization | Forbidden (403) |
 
 ---
@@ -208,13 +223,40 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `GET /api/issues/{id}/audits` - Returns chronological audit log for issue (Scoped by issue access rules).
 - `PUT /api/issues/{id}` - Updates title, description, type, priority, and module (`projectId`, `reporter`, `stage`, `verificationStatus` immutable). Creates `FIELD_CHANGED` audit records for changed fields in same transaction.
 - `PATCH /api/issues/{id}/stage` - Transitions issue stage (`SUBMITTED` → `RECEIVED` → `UNDER_DEVELOPMENT` → `TESTING` → `DEPLOYED`, `SUBMITTED` → `DECLINED`, `TESTING` → `RESOLVED`) adhering to state machine and RBAC. Creates `STAGE_CHANGED` audit record in same transaction.
-- `DELETE /api/issues/{id}` - Deletes issue (`APP_ADMIN` or `CLIENT_ADMIN` of project's org; `CLIENT_USER` receives `403`).
+- `DELETE /api/issues/{id}` - Deletes issue (`APP_ADMIN` or `CLIENT_ADMIN` of project's org; `CLIENT_USER` receives `403`). Blocked if attachments exist.
 
 ### Issue Comment Endpoints (`/api/issues/{issueId}/comments`)
 - `POST /api/issues/{issueId}/comments` - Creates comment on accessible issue. Author set from security context.
 - `GET /api/issues/{issueId}/comments` - Returns list of comments ordered chronologically (`createdAt ASC, id ASC`).
 - `PUT /api/issues/{issueId}/comments/{commentId}` - Updates comment content (Author or `APP_ADMIN` only).
 - `DELETE /api/issues/{issueId}/comments/{commentId}` - Deletes comment (Author or `APP_ADMIN` only).
+
+### Issue Attachment Endpoints (`/api/issues/{issueId}/attachments`)
+- `POST /api/issues/{issueId}/attachments` - Uploads attachment (`file` multipart field) to Cloudflare R2 and saves metadata.
+- `GET /api/issues/{issueId}/attachments` - Returns attachment metadata list ordered chronologically (`createdAt ASC, id ASC`).
+- `GET /api/issues/{issueId}/attachments/{attachmentId}/download` - Generates a short-lived presigned download URL (15-min expiry) after issue authorization verification.
+- `DELETE /api/issues/{issueId}/attachments/{attachmentId}` - Deletes attachment object from R2 and metadata from DB (Uploader or `APP_ADMIN` only).
+
+---
+
+## 8. Cloudflare R2 Storage & Configuration
+
+### Required Environment Variables
+Configure the following environment variables for Cloudflare R2:
+```env
+R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=<your_access_key_id>
+R2_SECRET_ACCESS_KEY=<your_secret_access_key>
+R2_BUCKET_NAME=<your_bucket_name>
+R2_REGION=auto
+```
+
+### Storage Security & Rules
+- **Private Bucket Requirement**: Cloudflare R2 buckets MUST remain private. Raw or guessable R2 object URLs are never exposed. Access is strictly granted via temporary presigned URLs.
+- **Maximum File Size**: 10 MB maximum per file, enforced server-side.
+- **Strict File Type Allowlist**: Allowed MIME types are `image/jpeg`, `image/png`, `image/webp`, `application/pdf`, and `text/plain`. Binary files undergo magic-byte signature validation to prevent file extension spoofing. Executable file uploads are strictly forbidden.
+- **Server-Generated Unpredictable Object Keys**: Object keys follow the format `issues/{issueId}/{randomUUID}.{ext}` so filenames cannot be guessed or manipulated.
+- **Local Development & Automated Testing**: In the test profile (`@Profile("test")`), `MockStorageService` is active. No real Cloudflare R2 credentials or network connections are required for automated test suites. In non-test environments (`@Profile("!test")`), `R2StorageService` uses AWS S3 SDK v2 to interface with Cloudflare R2.
 
 ---
 

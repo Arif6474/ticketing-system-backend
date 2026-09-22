@@ -35,6 +35,7 @@ public class IssueService {
     private final IssueStageTransitionService stageTransitionService;
     private final IssueAuditService issueAuditService;
     private final IssueCommentRepository commentRepository;
+    private final IssueAttachmentRepository attachmentRepository;
 
     public IssueService(IssueRepository issueRepository,
                         ProjectRepository projectRepository,
@@ -43,7 +44,8 @@ public class IssueService {
                         ProjectMembershipRepository membershipRepository,
                         IssueStageTransitionService stageTransitionService,
                         IssueAuditService issueAuditService,
-                        IssueCommentRepository commentRepository) {
+                        IssueCommentRepository commentRepository,
+                        IssueAttachmentRepository attachmentRepository) {
         this.issueRepository = issueRepository;
         this.projectRepository = projectRepository;
         this.moduleRepository = moduleRepository;
@@ -52,6 +54,7 @@ public class IssueService {
         this.stageTransitionService = stageTransitionService;
         this.issueAuditService = issueAuditService;
         this.commentRepository = commentRepository;
+        this.attachmentRepository = attachmentRepository;
     }
 
     @Transactional
@@ -273,6 +276,10 @@ public class IssueService {
 
         if (commentRepository.existsByIssueId(issueId)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Cannot delete issue because it has associated comments");
+        }
+
+        if (attachmentRepository.existsByIssueId(issueId)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Cannot delete issue because it has associated attachments");
         }
 
         issueRepository.delete(issue);
