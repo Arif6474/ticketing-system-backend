@@ -40,6 +40,12 @@ public class IssueAuditService {
         auditRepository.save(audit);
     }
 
+    @Transactional
+    public void recordVerificationChange(Issue issue, User actor, String oldValue, String newValue) {
+        IssueAudit audit = new IssueAudit(issue, actor, AuditEventType.VERIFICATION_CHANGED, "verificationStatus", oldValue, newValue);
+        auditRepository.save(audit);
+    }
+
     @Transactional(readOnly = true)
     public List<IssueAuditResponse> getAuditsForIssue(UUID issueId) {
         List<IssueAudit> audits = auditRepository.findByIssueIdOrderByCreatedAtAscIdAsc(issueId);

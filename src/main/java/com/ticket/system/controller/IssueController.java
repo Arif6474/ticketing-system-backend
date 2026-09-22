@@ -3,6 +3,7 @@ package com.ticket.system.controller;
 import com.ticket.system.dto.request.CreateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueStageRequest;
+import com.ticket.system.dto.request.UpdateVerificationStatusRequest;
 import com.ticket.system.dto.response.GenericResponse;
 import com.ticket.system.dto.response.IssueAuditResponse;
 import com.ticket.system.dto.response.IssueResponse;
@@ -60,6 +61,19 @@ public class IssueController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/verification-queue")
+    public ResponseEntity<PageResponse<IssueResponse>> getVerificationQueue(
+            @AuthenticationPrincipal UserSecurityDetails userDetails,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) UUID projectId) {
+        PageResponse<IssueResponse> response = issueService.getVerificationQueue(
+                userDetails.getId(), page, size, search, projectId
+        );
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<IssueResponse> getIssueById(
             @AuthenticationPrincipal UserSecurityDetails userDetails,
@@ -91,6 +105,15 @@ public class IssueController {
             @PathVariable UUID id,
             @Valid @RequestBody UpdateIssueStageRequest request) {
         IssueResponse response = issueService.updateIssueStage(userDetails.getId(), id, request);
+        return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/{id}/verification")
+    public ResponseEntity<IssueResponse> updateVerificationStatus(
+            @AuthenticationPrincipal UserSecurityDetails userDetails,
+            @PathVariable UUID id,
+            @Valid @RequestBody UpdateVerificationStatusRequest request) {
+        IssueResponse response = issueService.updateVerificationStatus(userDetails.getId(), id, request);
         return ResponseEntity.ok(response);
     }
 

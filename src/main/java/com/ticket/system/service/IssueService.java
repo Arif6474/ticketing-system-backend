@@ -3,6 +3,7 @@ package com.ticket.system.service;
 import com.ticket.system.dto.request.CreateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueStageRequest;
+import com.ticket.system.dto.request.UpdateVerificationStatusRequest;
 import com.ticket.system.dto.response.GenericResponse;
 import com.ticket.system.dto.response.IssueAuditResponse;
 import com.ticket.system.dto.response.IssueResponse;
@@ -312,6 +313,75 @@ public class IssueService {
         issue.setStage(request.getStage());
         Issue updated = issueRepository.save(issue);
         issueAuditService.recordStageChange(updated, currentUser, oldStage.name(), request.getStage().name());
+        return IssueResponse.fromEntity(updated);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<IssueResponse> getVerificationQueue(UUID currentUserId, int page, int size, String search, UUID projectId) {
+        User currentUser = getCurrentUser(currentUserId);
+
+        if (currentUser.getRole() == Role.CLIENT_USER) {
+            throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_USER is not authorized to access the verification queue");
+        }
+
+        UUID targetOrgId = null;
+        if (currentUser.getRole() == Role.CLIENT_ADMIN) {
+            targetOrgId = currentUser.getOrganization().getId();
+        }
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id")));
+
+        Specification<Issue> spec = IssueSpecification.filterIssues(
+                search, projectId, null, null, null, null,
+                VerificationStatus.PENDING_VERIFICATION, null, targetOrgId, null
+        );
+
+        Page<Issue> issuePage = issueRepository.findAll(spec, pageable);
+
+        Page<IssueResponse> responsePage = issuePage.map(IssueResponse::fromEntity);
+        return PageResponse.fromPage(responsePage);
+    }
+
+    @Transactional
+    public IssueResponse updateVerificationStatus(UUID currentUserId, UUID issueId, UpdateVerificationStatusRequest request) {
+        User currentUser = getCurrentUser(currentUserId);
+        if (currentUser.getRole() == Role.CLIENT_USER) {
+            throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_USER is not authorized to perform issue verification");
+        }
+
+        if (request.getStatus() == null || request.getStatus() == VerificationStatus.PENDING_VERIFICATION) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Verification status decision must be VERIFIED or REJECTED");
+        }
+
+        Issue issue = issueRepository.findById(issueId)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Issue not found"));
+
+        if (currentUser.getRole() == Role.CLIENT_ADMIN) {
+            if (!Objects.equals(issue.getProject().getOrganization().getId(), currentUser.getOrganization().getId())) {
+                throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_ADMIN can only perform verification for issues in their own organization");
+            }
+        }
+
+        if (issue.getVerificationStatus() != VerificationStatus.PENDING_VERIFICATION) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Issue is not pending verification; current status: " + issue.getVerificationStatus());
+        }
+
+        VerificationStatus oldStatus = issue.getVerificationStatus();
+        VerificationStatus newStatus = request.getStatus();
+
+        issue.setVerificationStatus(newStatus);
+
+        // If VERIFIED and currently in SUBMITTED stage, transition SUBMITTED -> RECEIVED via state machine
+        if (newStatus == VerificationStatus.VERIFIED && issue.getStage() == IssueStage.SUBMITTED) {
+            IssueStage oldStage = issue.getStage();
+            stageTransitionService.validateTransition(oldStage, IssueStage.RECEIVED, currentUser.getRole());
+            issue.setStage(IssueStage.RECEIVED);
+            issueAuditService.recordStageChange(issue, currentUser, oldStage.name(), IssueStage.RECEIVED.name());
+        }
+
+        Issue updated = issueRepository.save(issue);
+        issueAuditService.recordVerificationChange(updated, currentUser, oldStatus.name(), newStatus.name());
+
         return IssueResponse.fromEntity(updated);
     }
 
