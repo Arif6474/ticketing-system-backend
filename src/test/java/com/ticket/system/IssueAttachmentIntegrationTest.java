@@ -308,6 +308,71 @@ public class IssueAttachmentIntegrationTest {
     }
 
     @Test
+    @DisplayName("Valid WebP file upload succeeds")
+    void uploadAttachment_validWebp_success() throws Exception {
+        byte[] webpHeader = new byte[]{'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'E', 'B', 'P'};
+        MockMultipartFile file = new MockMultipartFile("file", "image.webp", "image/webp", webpHeader);
+
+        mockMvc.perform(multipart("/api/issues/" + issueAcme.getId() + "/attachments")
+                        .file(file)
+                        .header("Authorization", "Bearer " + tokenClientUserAcme))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.contentType", is("image/webp")));
+    }
+
+    @Test
+    @DisplayName("WAV file disguised as WebP (RIFF...WAVE) is rejected with 400 Bad Request")
+    void uploadAttachment_wavDisguisedAsWebp_rejected() throws Exception {
+        byte[] wavHeader = new byte[]{'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E'};
+        MockMultipartFile file = new MockMultipartFile("file", "audio.webp", "image/webp", wavHeader);
+
+        mockMvc.perform(multipart("/api/issues/" + issueAcme.getId() + "/attachments")
+                        .file(file)
+                        .header("Authorization", "Bearer " + tokenClientUserAcme))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("does not match WEBP format signature")));
+    }
+
+    @Test
+    @DisplayName("Executable file extension disguised with image/png MIME is rejected with 400 Bad Request")
+    void uploadAttachment_executableDisguisedAsPng_rejected() throws Exception {
+        byte[] pngHeader = new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+        MockMultipartFile file = new MockMultipartFile("file", "malware.exe", "image/png", pngHeader);
+
+        mockMvc.perform(multipart("/api/issues/" + issueAcme.getId() + "/attachments")
+                        .file(file)
+                        .header("Authorization", "Bearer " + tokenClientUserAcme))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("Executable file extensions are strictly forbidden")));
+    }
+
+    @Test
+    @DisplayName("PNG file content renamed to .pdf extension is rejected with 400 Bad Request")
+    void uploadAttachment_pngRenamedToPdf_rejected() throws Exception {
+        byte[] pngHeader = new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+        MockMultipartFile file = new MockMultipartFile("file", "image.pdf", "application/pdf", pngHeader);
+
+        mockMvc.perform(multipart("/api/issues/" + issueAcme.getId() + "/attachments")
+                        .file(file)
+                        .header("Authorization", "Bearer " + tokenClientUserAcme))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("does not match PDF format signature")));
+    }
+
+    @Test
+    @DisplayName("Text file containing binary NUL bytes is rejected with 400 Bad Request")
+    void uploadAttachment_textWithNulBytes_rejected() throws Exception {
+        byte[] binaryText = new byte[]{'H', 'e', 'l', 'l', 'o', 0x00, 'W', 'o', 'r', 'l', 'd'};
+        MockMultipartFile file = new MockMultipartFile("file", "binary.txt", "text/plain", binaryText);
+
+        mockMvc.perform(multipart("/api/issues/" + issueAcme.getId() + "/attachments")
+                        .file(file)
+                        .header("Authorization", "Bearer " + tokenClientUserAcme))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("contains binary NUL bytes")));
+    }
+
+    @Test
     @DisplayName("Empty file returns 400 Bad Request")
     void uploadAttachment_emptyFile_rejected() throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "empty.txt", "text/plain", new byte[0]);

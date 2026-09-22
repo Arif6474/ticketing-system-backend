@@ -70,7 +70,7 @@ public class R2StorageService implements StorageService {
 
             s3.putObject(putRequest, RequestBody.fromInputStream(inputStream, contentLength));
         } catch (Exception e) {
-            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to upload file to storage: " + e.getMessage());
+            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to upload file to storage");
         }
     }
 
@@ -84,7 +84,7 @@ public class R2StorageService implements StorageService {
 
             s3.deleteObject(deleteRequest);
         } catch (Exception e) {
-            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete file from storage: " + e.getMessage());
+            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete file from storage");
         }
     }
 
@@ -105,7 +105,7 @@ public class R2StorageService implements StorageService {
             PresignedGetObjectRequest presignedRequest = presigner.presignGetObject(presignRequest);
             return presignedRequest.url().toString();
         } catch (Exception e) {
-            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to generate presigned download URL: " + e.getMessage());
+            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to generate presigned download URL");
         }
     }
 }

@@ -186,15 +186,61 @@ public class IssueAttachmentService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Unsupported file type: " + contentType);
         }
 
-        // Validate binary magic bytes for supported binary types
+        String originalFilename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "";
+        validateExtensionConsistency(contentType.toLowerCase(), originalFilename);
+
+        // Validate binary magic bytes for supported binary types (buffer size 12 for WEBP RIFF+WEBP check)
         try (InputStream is = file.getInputStream()) {
-            byte[] header = new byte[8];
+            byte[] header = new byte[12];
             int read = is.read(header);
             if (read > 0) {
                 validateMagicBytes(contentType.toLowerCase(), header, read);
             }
         } catch (IOException e) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Failed to read file header for magic byte validation");
+        }
+    }
+
+    private void validateExtensionConsistency(String contentType, String filename) {
+        String ext = getExtension(filename);
+        if (ext.isEmpty()) {
+            return;
+        }
+
+        Set<String> forbiddenExecExtensions = Set.of(
+                "exe", "sh", "bat", "cmd", "dll", "so", "dylib", "py", "js", "vbs", "jar", "bin", "com", "msi"
+        );
+        if (forbiddenExecExtensions.contains(ext)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Executable file extensions are strictly forbidden");
+        }
+
+        switch (contentType) {
+            case "image/jpeg":
+                if (!ext.equals("jpg") && !ext.equals("jpeg")) {
+                    throw new AppException(HttpStatus.BAD_REQUEST, "File extension ." + ext + " does not match declared MIME type " + contentType);
+                }
+                break;
+            case "image/png":
+                if (!ext.equals("png")) {
+                    throw new AppException(HttpStatus.BAD_REQUEST, "File extension ." + ext + " does not match declared MIME type " + contentType);
+                }
+                break;
+            case "image/webp":
+                if (!ext.equals("webp")) {
+                    throw new AppException(HttpStatus.BAD_REQUEST, "File extension ." + ext + " does not match declared MIME type " + contentType);
+                }
+                break;
+            case "application/pdf":
+                if (!ext.equals("pdf")) {
+                    throw new AppException(HttpStatus.BAD_REQUEST, "File extension ." + ext + " does not match declared MIME type " + contentType);
+                }
+                break;
+            case "text/plain":
+                Set<String> validTextExtensions = Set.of("txt", "text", "log", "md", "csv");
+                if (!validTextExtensions.contains(ext)) {
+                    throw new AppException(HttpStatus.BAD_REQUEST, "File extension ." + ext + " is not valid for text/plain content");
+                }
+                break;
         }
     }
 
@@ -216,16 +262,19 @@ public class IssueAttachmentService {
                 }
                 break;
             case "image/webp":
-                if (read < 4 || header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F') {
+                if (read < 12 || header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F'
+                        || header[8] != 'W' || header[9] != 'E' || header[10] != 'B' || header[11] != 'P') {
                     throw new AppException(HttpStatus.BAD_REQUEST, "File content does not match WEBP format signature");
                 }
                 break;
             case "text/plain":
-                // Plain text readable verification
                 for (int i = 0; i < read; i++) {
-                    byte b = header[i];
-                    if (b != 0x09 && b != 0x0A && b != 0x0D && (b < 0x20 || b > 0x7E)) {
-                        // Allow standard printable ASCII or UTF-8 characters
+                    int val = header[i] & 0xFF;
+                    if (val == 0) {
+                        throw new AppException(HttpStatus.BAD_REQUEST, "File content contains binary NUL bytes and is not valid text");
+                    }
+                    if (val != 0x09 && val != 0x0A && val != 0x0D && (val < 0x20 || (val > 0x7E && val < 0xA0))) {
+                        throw new AppException(HttpStatus.BAD_REQUEST, "File content contains invalid control characters for text");
                     }
                 }
                 break;
