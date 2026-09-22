@@ -4,6 +4,7 @@ import com.ticket.system.dto.request.CreateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueStageRequest;
 import com.ticket.system.dto.response.GenericResponse;
+import com.ticket.system.dto.response.IssueAuditResponse;
 import com.ticket.system.dto.response.IssueResponse;
 import com.ticket.system.dto.response.PageResponse;
 import com.ticket.system.entity.IssuePriority;
@@ -18,6 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -63,6 +65,14 @@ public class IssueController {
             @AuthenticationPrincipal UserSecurityDetails userDetails,
             @PathVariable UUID id) {
         IssueResponse response = issueService.getIssueById(userDetails.getId(), id);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{id}/audits")
+    public ResponseEntity<List<IssueAuditResponse>> getIssueAudits(
+            @AuthenticationPrincipal UserSecurityDetails userDetails,
+            @PathVariable UUID id) {
+        List<IssueAuditResponse> response = issueService.getIssueAudits(userDetails.getId(), id);
         return ResponseEntity.ok(response);
     }
 

@@ -60,6 +60,7 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - **V3 (`V3__init_projects_and_memberships.sql`)**: Creates `projects` and `project_memberships` tables with foreign keys, unique constraint `(project_id, user_id)`, and performance indexes.
 - **V4 (`V4__init_modules.sql`)**: Creates `modules` table with `project_id` foreign key (`ON DELETE RESTRICT`), unique constraint `uk_modules_project_name` (`(project_id, name)`), and performance indexes.
 - **V5 (`V5__init_issues.sql`)**: Creates `issues` table with foreign keys `project_id`, `module_id` (nullable), `reporter_id` (`ON DELETE RESTRICT`), enums `type`, `priority`, `stage`, `verification_status`, and performance indexes.
+- **V6 (`V6__init_issue_audits.sql`)**: Creates `issue_audits` table with foreign keys `issue_id` and `actor_id` (`ON DELETE RESTRICT`), enums `action` (`ISSUE_CREATED`, `FIELD_CHANGED`, `STAGE_CHANGED`), `field_name`, `old_value`, `new_value`, and performance indexes.
 
 ---
 
@@ -98,6 +99,16 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `stage` (Enum: `SUBMITTED`, `RECEIVED`, `UNDER_DEVELOPMENT`, `TESTING`, `DEPLOYED`, `DECLINED`, `RESOLVED`) - Initial default: `SUBMITTED`.
 - `verification_status` (Enum: `PENDING_VERIFICATION`, `VERIFIED`, `REJECTED`) - Initial default: `PENDING_VERIFICATION`.
 
+### Issue Audit Model
+- `id` (UUID PRIMARY KEY)
+- `issue_id` (UUID NOT NULL REFERENCES `issues(id)` ON DELETE RESTRICT)
+- `actor_id` (UUID NOT NULL REFERENCES `users(id)` ON DELETE RESTRICT) - Authenticated actor performing mutation.
+- `action` (Enum: `ISSUE_CREATED`, `FIELD_CHANGED`, `STAGE_CHANGED`)
+- `fieldName` (String, nullable) - Business field modified (e.g. `title`, `description`, `type`, `priority`, `module`, `stage`).
+- `oldValue` (Text, nullable)
+- `newValue` (Text, nullable)
+- `createdAt` (Timestamp WITH TIME ZONE) - Append-only history, ordered chronologically (`createdAt ASC, id ASC`).
+
 ### Cross-Tenant & Module Integrity Guards
 - A user can ONLY create an issue for a project in their organization (or a project where they hold an active membership for `CLIENT_USER`).
 - When `moduleId` is provided, backend validation strictly enforces that the module exists, is active, and belongs to the specified `projectId`.
@@ -125,6 +136,7 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 | **List / View Issues** | Any Project | Own Org Projects Only | Member Projects Only |
 | **Edit Issue** | Any Issue | Own Org Issues | Own Reported Issues Only (in Member Projects) |
 | **Delete Issue** | Any Issue | Own Org Issues | Forbidden (403) |
+| **View Issue Audits** | Any Issue Audit | Own Org Issue Audits | Authorized Issue Audits (Member Projects) |
 | **User & Org Management** | Full | Own Organization | Forbidden (403) |
 
 ---
@@ -179,11 +191,12 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `DELETE /api/modules/{id}` - Deletes module (`APP_ADMIN` or `CLIENT_ADMIN` of the project's org).
 
 ### Issue Management Endpoints (`/api/issues`)
-- `POST /api/issues` - Creates a new issue. Project must be active. Reporter is set automatically. Default `stage = SUBMITTED`, `verificationStatus = PENDING_VERIFICATION`.
+- `POST /api/issues` - Creates a new issue. Project must be active. Reporter is set automatically. Default `stage = SUBMITTED`, `verificationStatus = PENDING_VERIFICATION`. Creates `ISSUE_CREATED` audit record in same transaction.
 - `GET /api/issues` - Paginated issue search (`search`, `projectId`, `moduleId`, `type`, `priority`, `stage`, `verificationStatus`, `reporterId`, `page`, `size`). Scoped by RBAC.
 - `GET /api/issues/{id}` - Retrieves issue details by ID (Scoped by RBAC).
-- `PUT /api/issues/{id}` - Updates title, description, type, priority, and module (`projectId`, `reporter`, `stage`, `verificationStatus` immutable).
-- `PATCH /api/issues/{id}/stage` - Transitions issue stage (`SUBMITTED` → `RECEIVED` → `UNDER_DEVELOPMENT` → `TESTING` → `DEPLOYED`, `SUBMITTED` → `DECLINED`, `TESTING` → `RESOLVED`) adhering to centralized state machine and role permissions.
+- `GET /api/issues/{id}/audits` - Returns chronological audit log for issue (Scoped by issue access rules).
+- `PUT /api/issues/{id}` - Updates title, description, type, priority, and module (`projectId`, `reporter`, `stage`, `verificationStatus` immutable). Creates `FIELD_CHANGED` audit records for changed fields in same transaction.
+- `PATCH /api/issues/{id}/stage` - Transitions issue stage (`SUBMITTED` → `RECEIVED` → `UNDER_DEVELOPMENT` → `TESTING` → `DEPLOYED`, `SUBMITTED` → `DECLINED`, `TESTING` → `RESOLVED`) adhering to state machine and RBAC. Creates `STAGE_CHANGED` audit record in same transaction.
 - `DELETE /api/issues/{id}` - Deletes issue (`APP_ADMIN` or `CLIENT_ADMIN` of project's org; `CLIENT_USER` receives `403`).
 
 ---
