@@ -163,6 +163,8 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 | **Upload / List Attachments** | Any Accessible Issue | Own Org Issues | Authorized Member Project Issues |
 | **Download Attachment** | Any Accessible Issue | Own Org Issues | Authorized Member Project Issues |
 | **Delete Attachment** | Any Attachment | Uploader Only (Own Org) | Uploader Only (Member Projects) |
+| **View Verification Queue** | All Organizations | Own Organization Only | Forbidden (403) |
+| **Verification Decision** | Any Issue | Own Org Issues Only | Forbidden (403) |
 | **User & Org Management** | Full | Own Organization | Forbidden (403) |
 
 ---
@@ -216,26 +218,28 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `PATCH /api/modules/{id}/deactivate` - Deactivates module (`isActive = false`).
 - `DELETE /api/modules/{id}` - Deletes module (`APP_ADMIN` or `CLIENT_ADMIN` of the project's org).
 
-### Issue Management Endpoints (`/api/issues`)
-- `POST /api/issues` - Creates a new issue. Project must be active. Reporter is set automatically. Default `stage = SUBMITTED`, `verificationStatus = PENDING_VERIFICATION`. Creates `ISSUE_CREATED` audit record in same transaction.
+### Issue Management & Verification Endpoints (`/api/issues`)
+- `POST /api/issues` - Creates a new issue. Default `stage = SUBMITTED`, `verificationStatus = PENDING_VERIFICATION`. Creates `ISSUE_CREATED` audit record.
 - `GET /api/issues` - Paginated issue search (`search`, `projectId`, `moduleId`, `type`, `priority`, `stage`, `verificationStatus`, `reporterId`, `page`, `size`). Scoped by RBAC.
+- `GET /api/issues/verification-queue` - Paginated verification queue listing issues in `PENDING_VERIFICATION` status (`page`, `size`, `search`, `projectId`). (`APP_ADMIN` all orgs, `CLIENT_ADMIN` own org, `CLIENT_USER` 403).
 - `GET /api/issues/{id}` - Retrieves issue details by ID (Scoped by RBAC).
-- `GET /api/issues/{id}/audits` - Returns chronological audit log for issue (Scoped by issue access rules).
-- `PUT /api/issues/{id}` - Updates title, description, type, priority, and module (`projectId`, `reporter`, `stage`, `verificationStatus` immutable). Creates `FIELD_CHANGED` audit records for changed fields in same transaction.
-- `PATCH /api/issues/{id}/stage` - Transitions issue stage (`SUBMITTED` → `RECEIVED` → `UNDER_DEVELOPMENT` → `TESTING` → `DEPLOYED`, `SUBMITTED` → `DECLINED`, `TESTING` → `RESOLVED`) adhering to state machine and RBAC. Creates `STAGE_CHANGED` audit record in same transaction.
-- `DELETE /api/issues/{id}` - Deletes issue (`APP_ADMIN` or `CLIENT_ADMIN` of project's org; `CLIENT_USER` receives `403`). Blocked if attachments exist.
+- `GET /api/issues/{id}/audits` - Returns chronological audit log for issue.
+- `PUT /api/issues/{id}` - Updates title, description, type, priority, and module.
+- `PATCH /api/issues/{id}/stage` - Transitions issue stage.
+- `PATCH /api/issues/{id}/verification` - Makes verification decision (`VERIFIED` or `REJECTED`). If `VERIFIED` and in `SUBMITTED` stage, automatically transitions stage to `RECEIVED` via state machine. Creates `VERIFICATION_CHANGED` (and optional `STAGE_CHANGED`) audit record in same transaction.
+- `DELETE /api/issues/{id}` - Deletes issue. Blocked if comments or attachments exist.
 
 ### Issue Comment Endpoints (`/api/issues/{issueId}/comments`)
-- `POST /api/issues/{issueId}/comments` - Creates comment on accessible issue. Author set from security context.
-- `GET /api/issues/{issueId}/comments` - Returns list of comments ordered chronologically (`createdAt ASC, id ASC`).
-- `PUT /api/issues/{issueId}/comments/{commentId}` - Updates comment content (Author or `APP_ADMIN` only).
-- `DELETE /api/issues/{issueId}/comments/{commentId}` - Deletes comment (Author or `APP_ADMIN` only).
+- `POST /api/issues/{issueId}/comments` - Creates comment on accessible issue.
+- `GET /api/issues/{issueId}/comments` - Returns list of comments ordered chronologically.
+- `PUT /api/issues/{issueId}/comments/{commentId}` - Updates comment content.
+- `DELETE /api/issues/{issueId}/comments/{commentId}` - Deletes comment.
 
 ### Issue Attachment Endpoints (`/api/issues/{issueId}/attachments`)
 - `POST /api/issues/{issueId}/attachments` - Uploads attachment (`file` multipart field) to Cloudflare R2 and saves metadata.
-- `GET /api/issues/{issueId}/attachments` - Returns attachment metadata list ordered chronologically (`createdAt ASC, id ASC`).
-- `GET /api/issues/{issueId}/attachments/{attachmentId}/download` - Generates a short-lived presigned download URL (15-min expiry) after issue authorization verification.
-- `DELETE /api/issues/{issueId}/attachments/{attachmentId}` - Deletes attachment object from R2 and metadata from DB (Uploader or `APP_ADMIN` only).
+- `GET /api/issues/{issueId}/attachments` - Returns attachment metadata list ordered chronologically.
+- `GET /api/issues/{issueId}/attachments/{attachmentId}/download` - Generates a short-lived presigned download URL.
+- `DELETE /api/issues/{issueId}/attachments/{attachmentId}` - Deletes attachment object from R2 and metadata from DB.
 
 ---
 
