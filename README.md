@@ -61,6 +61,7 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - **V4 (`V4__init_modules.sql`)**: Creates `modules` table with `project_id` foreign key (`ON DELETE RESTRICT`), unique constraint `uk_modules_project_name` (`(project_id, name)`), and performance indexes.
 - **V5 (`V5__init_issues.sql`)**: Creates `issues` table with foreign keys `project_id`, `module_id` (nullable), `reporter_id` (`ON DELETE RESTRICT`), enums `type`, `priority`, `stage`, `verification_status`, and performance indexes.
 - **V6 (`V6__init_issue_audits.sql`)**: Creates `issue_audits` table with foreign keys `issue_id` and `actor_id` (`ON DELETE RESTRICT`), enums `action` (`ISSUE_CREATED`, `FIELD_CHANGED`, `STAGE_CHANGED`), `field_name`, `old_value`, `new_value`, and performance indexes.
+- **V7 (`V7__init_issue_comments.sql`)**: Creates `issue_comments` table with foreign keys `issue_id` and `author_id` (`ON DELETE RESTRICT`), `content` TEXT NOT NULL, timestamps, and performance indexes.
 
 ---
 
@@ -109,6 +110,14 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `newValue` (Text, nullable)
 - `createdAt` (Timestamp WITH TIME ZONE) - Append-only history, ordered chronologically (`createdAt ASC, id ASC`).
 
+### Issue Comment Model
+- `id` (UUID PRIMARY KEY)
+- `issue_id` (UUID NOT NULL REFERENCES `issues(id)` ON DELETE RESTRICT)
+- `author_id` (UUID NOT NULL REFERENCES `users(id)` ON DELETE RESTRICT) - Authenticated author creating comment.
+- `content` (Text NOT NULL)
+- `createdAt` (Timestamp WITH TIME ZONE)
+- `updatedAt` (Timestamp WITH TIME ZONE)
+
 ### Cross-Tenant & Module Integrity Guards
 - A user can ONLY create an issue for a project in their organization (or a project where they hold an active membership for `CLIENT_USER`).
 - When `moduleId` is provided, backend validation strictly enforces that the module exists, is active, and belongs to the specified `projectId`.
@@ -137,6 +146,8 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 | **Edit Issue** | Any Issue | Own Org Issues | Own Reported Issues Only (in Member Projects) |
 | **Delete Issue** | Any Issue | Own Org Issues | Forbidden (403) |
 | **View Issue Audits** | Any Issue Audit | Own Org Issue Audits | Authorized Issue Audits (Member Projects) |
+| **Create / List Comments** | Any Accessible Issue | Own Org Issues | Authorized Member Project Issues |
+| **Edit / Delete Comment** | Any Comment | Own Comments Only | Own Comments Only |
 | **User & Org Management** | Full | Own Organization | Forbidden (403) |
 
 ---
@@ -198,6 +209,12 @@ Database schema modifications are managed exclusively via **Flyway migrations** 
 - `PUT /api/issues/{id}` - Updates title, description, type, priority, and module (`projectId`, `reporter`, `stage`, `verificationStatus` immutable). Creates `FIELD_CHANGED` audit records for changed fields in same transaction.
 - `PATCH /api/issues/{id}/stage` - Transitions issue stage (`SUBMITTED` → `RECEIVED` → `UNDER_DEVELOPMENT` → `TESTING` → `DEPLOYED`, `SUBMITTED` → `DECLINED`, `TESTING` → `RESOLVED`) adhering to state machine and RBAC. Creates `STAGE_CHANGED` audit record in same transaction.
 - `DELETE /api/issues/{id}` - Deletes issue (`APP_ADMIN` or `CLIENT_ADMIN` of project's org; `CLIENT_USER` receives `403`).
+
+### Issue Comment Endpoints (`/api/issues/{issueId}/comments`)
+- `POST /api/issues/{issueId}/comments` - Creates comment on accessible issue. Author set from security context.
+- `GET /api/issues/{issueId}/comments` - Returns list of comments ordered chronologically (`createdAt ASC, id ASC`).
+- `PUT /api/issues/{issueId}/comments/{commentId}` - Updates comment content (Author or `APP_ADMIN` only).
+- `DELETE /api/issues/{issueId}/comments/{commentId}` - Deletes comment (Author or `APP_ADMIN` only).
 
 ---
 
