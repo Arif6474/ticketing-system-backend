@@ -4,6 +4,7 @@ import com.ticket.system.dto.request.CreateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueRequest;
 import com.ticket.system.dto.request.UpdateIssueStageRequest;
 import com.ticket.system.dto.response.GenericResponse;
+import com.ticket.system.dto.response.IssueAuditResponse;
 import com.ticket.system.dto.response.IssueResponse;
 import com.ticket.system.dto.response.PageResponse;
 import com.ticket.system.entity.*;
@@ -19,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -31,19 +33,22 @@ public class IssueService {
     private final UserRepository userRepository;
     private final ProjectMembershipRepository membershipRepository;
     private final IssueStageTransitionService stageTransitionService;
+    private final IssueAuditService issueAuditService;
 
     public IssueService(IssueRepository issueRepository,
                         ProjectRepository projectRepository,
                         ModuleRepository moduleRepository,
                         UserRepository userRepository,
                         ProjectMembershipRepository membershipRepository,
-                        IssueStageTransitionService stageTransitionService) {
+                        IssueStageTransitionService stageTransitionService,
+                        IssueAuditService issueAuditService) {
         this.issueRepository = issueRepository;
         this.projectRepository = projectRepository;
         this.moduleRepository = moduleRepository;
         this.userRepository = userRepository;
         this.membershipRepository = membershipRepository;
         this.stageTransitionService = stageTransitionService;
+        this.issueAuditService = issueAuditService;
     }
 
     @Transactional
@@ -95,6 +100,7 @@ public class IssueService {
         );
 
         Issue saved = issueRepository.save(issue);
+        issueAuditService.recordIssueCreated(saved, currentUser);
         return IssueResponse.fromEntity(saved);
     }
 
@@ -200,13 +206,49 @@ public class IssueService {
             }
         }
 
-        issue.setTitle(request.getTitle().trim());
-        issue.setDescription(request.getDescription().trim());
-        issue.setType(request.getType());
-        issue.setPriority(request.getPriority());
+        String oldTitle = issue.getTitle();
+        String oldDescription = issue.getDescription();
+        IssueType oldType = issue.getType();
+        IssuePriority oldPriority = issue.getPriority();
+        Module oldModule = issue.getModule();
+
+        String newTitle = request.getTitle().trim();
+        String newDescription = request.getDescription().trim();
+        IssueType newType = request.getType();
+        IssuePriority newPriority = request.getPriority();
+
+        issue.setTitle(newTitle);
+        issue.setDescription(newDescription);
+        issue.setType(newType);
+        issue.setPriority(newPriority);
         issue.setModule(module);
 
         Issue updated = issueRepository.save(issue);
+
+        if (!Objects.equals(oldTitle, newTitle)) {
+            issueAuditService.recordFieldChange(updated, currentUser, "title", oldTitle, newTitle);
+        }
+        if (!Objects.equals(oldDescription, newDescription)) {
+            issueAuditService.recordFieldChange(updated, currentUser, "description", oldDescription, newDescription);
+        }
+        if (oldType != newType) {
+            issueAuditService.recordFieldChange(updated, currentUser, "type",
+                    oldType != null ? oldType.name() : null,
+                    newType != null ? newType.name() : null);
+        }
+        if (oldPriority != newPriority) {
+            issueAuditService.recordFieldChange(updated, currentUser, "priority",
+                    oldPriority != null ? oldPriority.name() : null,
+                    newPriority != null ? newPriority.name() : null);
+        }
+        UUID oldModuleId = oldModule != null ? oldModule.getId() : null;
+        UUID newModuleId = module != null ? module.getId() : null;
+        if (!Objects.equals(oldModuleId, newModuleId)) {
+            String oldModName = oldModule != null ? oldModule.getName() : null;
+            String newModName = module != null ? module.getName() : null;
+            issueAuditService.recordFieldChange(updated, currentUser, "module", oldModName, newModName);
+        }
+
         return IssueResponse.fromEntity(updated);
     }
 
@@ -250,11 +292,33 @@ public class IssueService {
             }
         }
 
-        stageTransitionService.validateTransition(issue.getStage(), request.getStage(), currentUser.getRole());
+        IssueStage oldStage = issue.getStage();
+        stageTransitionService.validateTransition(oldStage, request.getStage(), currentUser.getRole());
 
         issue.setStage(request.getStage());
         Issue updated = issueRepository.save(issue);
+        issueAuditService.recordStageChange(updated, currentUser, oldStage.name(), request.getStage().name());
         return IssueResponse.fromEntity(updated);
+    }
+
+    @Transactional(readOnly = true)
+    public List<IssueAuditResponse> getIssueAudits(UUID currentUserId, UUID issueId) {
+        User currentUser = getCurrentUser(currentUserId);
+        Issue issue = issueRepository.findById(issueId)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Issue not found"));
+
+        if (currentUser.getRole() == Role.CLIENT_ADMIN) {
+            if (!Objects.equals(issue.getProject().getOrganization().getId(), currentUser.getOrganization().getId())) {
+                throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_ADMIN cannot access audit history of another organization");
+            }
+        } else if (currentUser.getRole() == Role.CLIENT_USER) {
+            if (!Objects.equals(issue.getProject().getOrganization().getId(), currentUser.getOrganization().getId()) ||
+                !membershipRepository.existsByProjectIdAndUserId(issue.getProject().getId(), currentUser.getId())) {
+                throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_USER can only access audit history of member projects");
+            }
+        }
+
+        return issueAuditService.getAuditsForIssue(issueId);
     }
 
     private User getCurrentUser(UUID userId) {
