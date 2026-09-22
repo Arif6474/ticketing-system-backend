@@ -14,4 +14,6 @@ public interface IssueCommentRepository extends JpaRepository<IssueComment, UUID
     List<IssueComment> findByIssueIdOrderByCreatedAtAscIdAsc(UUID issueId);
 
     Optional<IssueComment> findByIdAndIssueId(UUID id, UUID issueId);
+
+    boolean existsByIssueId(UUID issueId);
 }

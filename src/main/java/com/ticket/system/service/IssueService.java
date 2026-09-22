@@ -34,6 +34,7 @@ public class IssueService {
     private final ProjectMembershipRepository membershipRepository;
     private final IssueStageTransitionService stageTransitionService;
     private final IssueAuditService issueAuditService;
+    private final IssueCommentRepository commentRepository;
 
     public IssueService(IssueRepository issueRepository,
                         ProjectRepository projectRepository,
@@ -41,7 +42,8 @@ public class IssueService {
                         UserRepository userRepository,
                         ProjectMembershipRepository membershipRepository,
                         IssueStageTransitionService stageTransitionService,
-                        IssueAuditService issueAuditService) {
+                        IssueAuditService issueAuditService,
+                        IssueCommentRepository commentRepository) {
         this.issueRepository = issueRepository;
         this.projectRepository = projectRepository;
         this.moduleRepository = moduleRepository;
@@ -49,6 +51,7 @@ public class IssueService {
         this.membershipRepository = membershipRepository;
         this.stageTransitionService = stageTransitionService;
         this.issueAuditService = issueAuditService;
+        this.commentRepository = commentRepository;
     }
 
     @Transactional
@@ -266,6 +269,10 @@ public class IssueService {
             if (!Objects.equals(issue.getProject().getOrganization().getId(), currentUser.getOrganization().getId())) {
                 throw new AppException(HttpStatus.FORBIDDEN, "CLIENT_ADMIN can only delete issues in their own organization");
             }
+        }
+
+        if (commentRepository.existsByIssueId(issueId)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Cannot delete issue because it has associated comments");
         }
 
         issueRepository.delete(issue);

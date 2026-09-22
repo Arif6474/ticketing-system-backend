@@ -422,4 +422,17 @@ public class IssueCommentIntegrationTest {
 
         assertTrue(commentRepository.existsById(commentAcme.getId()));
     }
+
+    @Test
+    @DisplayName("Deleting issue with associated comments is blocked with 400 Bad Request")
+    void deleteIssueWithComments_blocked() throws Exception {
+        commentRepository.saveAndFlush(new IssueComment(issueAcme, clientUserAcme, "Active comment"));
+
+        mockMvc.perform(delete("/api/issues/" + issueAcme.getId())
+                        .header("Authorization", "Bearer " + tokenAppAdmin))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("associated comments")));
+
+        assertTrue(issueRepository.existsById(issueAcme.getId()));
+    }
 }
