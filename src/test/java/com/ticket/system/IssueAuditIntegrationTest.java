@@ -260,6 +260,53 @@ public class IssueAuditIntegrationTest {
     }
 
     @Test
+    @DisplayName("Changing module to or from null creates correct module audit entry")
+    void moduleNullChange_createsCorrectAuditEntry() throws Exception {
+        Issue issue = issueRepository.saveAndFlush(new Issue(projAcme, modAcme1, clientUserAcme,
+                "Title", "Description", IssueType.BUG, IssuePriority.MEDIUM));
+
+        UpdateIssueRequest requestNullModule = new UpdateIssueRequest(
+                "Title",
+                "Description",
+                IssueType.BUG,
+                IssuePriority.MEDIUM,
+                null
+        );
+
+        mockMvc.perform(put("/api/issues/" + issue.getId())
+                        .header("Authorization", "Bearer " + tokenClientUserAcme)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestNullModule)))
+                .andExpect(status().isOk());
+
+        List<IssueAudit> audits = auditRepository.findByIssueIdOrderByCreatedAtAscIdAsc(issue.getId());
+        assertEquals(1, audits.size());
+        assertEquals("module", audits.get(0).getFieldName());
+        assertEquals("Auth Module", audits.get(0).getOldValue());
+        assertNull(audits.get(0).getNewValue());
+
+        UpdateIssueRequest requestAttachModule = new UpdateIssueRequest(
+                "Title",
+                "Description",
+                IssueType.BUG,
+                IssuePriority.MEDIUM,
+                modAcme2.getId()
+        );
+
+        mockMvc.perform(put("/api/issues/" + issue.getId())
+                        .header("Authorization", "Bearer " + tokenClientUserAcme)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestAttachModule)))
+                .andExpect(status().isOk());
+
+        audits = auditRepository.findByIssueIdOrderByCreatedAtAscIdAsc(issue.getId());
+        assertEquals(2, audits.size());
+        assertEquals("module", audits.get(1).getFieldName());
+        assertNull(audits.get(1).getOldValue());
+        assertEquals("Billing Module", audits.get(1).getNewValue());
+    }
+
+    @Test
     @DisplayName("Unchanged fields do not create audit entries")
     void unchangedFields_doNotCreateAuditEntries() throws Exception {
         Issue issue = issueRepository.saveAndFlush(new Issue(projAcme, modAcme1, clientUserAcme,
